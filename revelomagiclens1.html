@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Revelo Magic Lens - Underground & Focus</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+    <style>
+        html, body, #cesiumContainer {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            touch-action: none; 
+        }
+        #lensOverlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            width: 100%; height: 100%;
+            box-shadow: inset 0 0 100px 30px rgba(0,0,0,0.35);
+            pointer-events: none;
+            z-index: 5;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+        }
+        #lensOverlay.active { display: block; opacity: 1; }
+
+        .control-btn {
+            position: relative;
+            background: rgba(30, 30, 30, 0.85);
+            color: #f0f0f0;
+            padding: 10px 15px; 
+            border-radius: 8px;
+            font-weight: bold;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            font-size: 14px; 
+            min-width: 180px; 
+            text-align: left;
+            cursor: pointer;
+            box-sizing: border-box;
+            transition: background-color 0.2s, border-color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-btn .icon { font-size: 1.2em; }
+        .control-btn:hover:not(:disabled) { background: rgba(50, 50, 50, 0.9); border-color: rgba(255, 255, 255, 0.5); }
+        .control-btn:active:not(:disabled) { background: rgba(70, 70, 70, 0.95); }
+        .control-btn:disabled { background: rgba(80, 80, 80, 0.7); color: #999; cursor: not-allowed; border-color: rgba(150, 150, 150, 0.4); }
+        
+        #btnContainer {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #status {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 13px;
+            text-align: center;
+            pointer-events: none; 
+        }
+        @media (max-width: 600px) {
+            .control-btn { padding: 8px 12px; font-size: 12px; min-width: 160px; }
+            #btnContainer { top: 10px; left: 10px; gap: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="lensOverlay"></div>
+    <div id="btnContainer">
+        <button id="gpsBtn" class="control-btn"><span class="icon">🛰️</span>Enable GPS</button>
+        <button id="orientationBtn" class="control-btn"><span class="icon">🔮</span>Activate Magic Lens</button>
+        <button id="calibrateBtn" class="control-btn" style="display:none;"><span class="icon">🧭</span>Calibrate Lens</button>
+        <button id="disableTrackingBtn" class="control-btn" style="display:none;"><span class="icon">🚫</span>Disable All</button>
+    </div>
+    <div id="status">Initializing Revelo Magic Lens... Please ensure HTTPS.</div>
+    <script>
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5Y2ZiMzU0Mi00NjkyLTQxZjctOGNjZC02YjgyYzliOTEwNGYiLCJpZCI6Mjk2ODk1LCJpYXQiOjE3NDc2NTc5MzZ9.Mb95-v_3Pm4NQQohnck02L-zmHD4SWj5vv57m0fP4ig';
+
+        const isWebView = /(WebView|Android|iPhone|iPad|iPod)/i.test(navigator.userAgent);
+        const isIOS = /(iPhone|iPad|iPod)/i.test(navigator.userAgent);
+
+        let lastStatusUpdateTime = 0;
+        let lastStatusIsError = false;
+        const MIN_ERROR_DISPLAY_TIME = 5000; 
+
+        const lensOverlay = document.getElementById('lensOverlay');
+        const orientationEventName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+
+        function updateStatus(message, isError = false) {
+            const now = Date.now();
+            if (lastStatusIsError && !isError && (now - lastStatusUpdateTime < MIN_ERROR_DISPLAY_TIME)) {
+                return;
+            }
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.style.color = isError ? 'yellow' : 'white';
+            if (isError) console.error(message); else console.log(message);
+            lastStatusUpdateTime = now;
+            lastStatusIsError = isError;
+        }
+
+        updateStatus(`Revelo Magic Lens. Env: ${isWebView ? 'WebView' : 'Browser'} ${isIOS ? 'iOS' : ''}. HTTPS for sensors.`);
+
+        var viewer = new Cesium.Viewer("cesiumContainer", {
+            terrainProvider: Cesium.Terrain.fromWorldTerrain(),
+            baseLayerPicker: true, 
+            shouldAnimate: true, 
+            sceneMode: Cesium.SceneMode.SCENE3D,
+            vrButton: false, geocoder: false, homeButton: true, 
+            scene3DOnly: true, 
+            selectionIndicator: true, 
+            infoBox: true,          
+            animation: false, timeline: false,
+            requestRenderMode: true, 
+            maximumRenderTimeChange: Infinity 
+        });
+
+        viewer.camera.frustum.fov = Cesium.Math.toRadians(65); 
+
+        const scene = viewer.scene;
+        const globe = scene.globe;
+        scene.skyAtmosphere.show = true; 
+        globe.enableLighting = true;
+        viewer.shadows = true; 
+        scene.highDynamicRange = true; 
+
+        scene.screenSpaceCameraController.enableCollisionDetection = false;
+        
+        globe.undergroundColor = Cesium.Color.DARKSLATEGRAY.withAlpha(0.7); 
+        globe.undergroundColorAlphaByDistance = new Cesium.NearFarScalar(1.0, 0.0, 300.0, 0.9); 
+        globe.depthTestAgainstTerrain = false; 
+
+        const osmBuildingsTileset = new Cesium.Cesium3DTileset({
+            url: Cesium.IonResource.fromAssetId(96188), 
+            maximumScreenSpaceError: isWebView ? 10 : 6 
+        });
+        viewer.scene.primitives.add(osmBuildingsTileset);
+
+        const circleShape = [];
+        const pipeRadius = 0.5; 
+        const pipeSegments = 20; 
+        for (let i = 0; i < pipeSegments; i++) {
+            const angle = (i / pipeSegments) * Cesium.Math.TWO_PI;
+            circleShape.push(new Cesium.Cartesian2(pipeRadius * Math.cos(angle), pipeRadius * Math.sin(angle)));
+        }
+
+        const pipelineEntities = []; 
+
+        function drawPipeline(coordinates, color, depth, name) {
+            if (!coordinates || coordinates.length < 2) { return; }
+            
+            const material = new Cesium.Material({ 
+                fabric: {
+                    type: 'Color',
+                    uniforms: {
+                        color: color.withAlpha(0.9)
+                    }
+                }
+            });
+            
+            const arMaterial = new Cesium.Material({ 
+                fabric: {
+                    type: 'Color',
+                    uniforms: {
+                        color: Cesium.Color.YELLOW.withAlpha(0.95) 
+                    }
+                }
+            });
+
+
+            const entity = viewer.entities.add({
+                name: name || `Pipeline (Depth: ${depth}m)`,
+                description: `This pipeline segment is at an approximate depth of ${Math.abs(depth)}m underground. Click to focus.`,
+                polylineVolume: {
+                    positions: coordinates.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, depth)),
+                    shape: circleShape,
+                    material: material, 
+                    outline: true, 
+                    outlineColor: color.darken(0.5, new Cesium.Color()).withAlpha(0.95), 
+                    outlineWidth: 0.35, 
+                    cornerType: Cesium.CornerType.ROUNDED 
+                },
+                _arActiveMaterial: arMaterial,
+                _originalMaterial: material,
+                _pipelineCoordinates: coordinates.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, depth)) 
+            });
+            pipelineEntities.push(entity);
+        }
+        
+        function fetchPipeline(url, color, depth, namePrefix) {
+            updateStatus("Revealing underground networks...");
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}. Check GeoServer CORS/SSL.`);
+                    return response.json();
+                })
+                .then(({ features }) => {
+                    if (!features || features.length === 0) { updateStatus("No network features found in this layer.", true); return; }
+                    features.forEach(({ geometry, properties }, index) => {
+                        if (!geometry || !geometry.coordinates) return;
+                        const segments = geometry.type === "LineString" ? [geometry.coordinates] : geometry.coordinates;
+                        segments.forEach(coords => {
+                            if (Array.isArray(coords) && coords.length > 0 && Array.isArray(coords[0])) {
+                                const entityName = properties?.name || `${namePrefix} ${index + 1}`;
+                                drawPipeline(coords, color, depth, entityName);
+                            }
+                        });
+                    });
+                    updateStatus(`Networks revealed (${features.length} features). Select to inspect.`);
+                    viewer.scene.requestRender(); 
+                })
+                .catch(err => {
+                    console.error(`Network load failed: ${url}`, err);
+                    updateStatus(`Network load fail: ${err.message}. Check console & GeoServer.`, true);
+                });
+        }
+
+        fetchPipeline(
+            "https://varun:8443/geoserver/Hilltop_pipelines/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=Hilltop_pipelines%3APOLYLINE&maxFeatures=50&outputFormat=application%2Fjson", 
+            Cesium.Color.ORANGERED, -20, "Main Pipeline"
+        );
+        fetchPipeline(
+            "https://varun:8443/geoserver/Hilltop_pipelines/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=Hilltop_pipelines%3AHilltop_pipeline2&maxFeatures=50&outputFormat=application%2Fjson", 
+            Cesium.Color.DEEPSKYBLUE, -5, "Power Cable"
+        );
+        fetchPipeline(
+            "https://varun:8443/geoserver/Hilltop_pipelines/ows?service=WFS&version=1.0.0&r-equest=GetFeature&typeName=Hilltop_pipelines%3AHilltop_Pipeline3&maxFeatures=50&outputFormat=application%2Fjson", 
+            Cesium.Color.RED, -10, "OFC Cable"
+        );
+        fetchPipeline(
+            "https://varun:8443/geoserver/Pipelines/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=Pipelines%3AWathoda%20Pipeline&maxFeatures=50&outputFormat=application%2Fjson", 
+            Cesium.Color.BLUE, -10, "Wathoda Pipeline"
+        );
+
+
+        viewer.screenSpaceEventHandler.setInputAction((movement) => {
+            const pickedObject = viewer.scene.pick(movement.position);
+            if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.polylineVolume) {
+                const entity = pickedObject.id;
+                viewer.selectedEntity = entity; 
+                updateStatus(`Focusing on: ${entity.name || 'Selected Network Segment'}`);
+
+                let targetBoundingSphere;
+                if (entity._pipelineCoordinates && entity._pipelineCoordinates.length > 0) {
+                    targetBoundingSphere = Cesium.BoundingSphere.fromPoints(entity._pipelineCoordinates);
+                } else {
+                    const
+                    cartesianPositions = entity.polylineVolume.positions.getValue(viewer.clock.currentTime);
+                    if (cartesianPositions && cartesianPositions.length > 0) {
+                        targetBoundingSphere = Cesium.BoundingSphere.fromPoints(cartesianPositions);
+                    } else {
+                        console.warn("Could not determine bounding sphere for flyTo.");
+                        updateStatus("Could not determine focus point.", true);
+                        return;
+                    }
+                }
+                
+                const distance = Math.max(targetBoundingSphere.radius * 2.5, 30); 
+
+                viewer.flyTo(entity, { 
+                    duration: 1.3, 
+                    offset: new Cesium.HeadingPitchRange(
+                        viewer.camera.heading, 
+                        Cesium.Math.toRadians(-35), 
+                        distance 
+                    )
+                }).then(() => {
+                    updateStatus(`Focused on: ${entity.name || 'Selected Network Segment'}.`);
+                    viewer.scene.requestRender();
+                }).catch(error => {
+                    console.error("FlyTo error:", error);
+                    updateStatus("Error focusing on segment.", true);
+                });
+
+            } else if (viewer.selectedEntity) {
+                viewer.selectedEntity = undefined; 
+            }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+        const toRad = deg => Cesium.Math.toRadians(deg || 0);
+
+        let lat = 21.1458, lon = 79.0882, alt = 30; 
+        let currentHeading = 0, currentPitch = -30, currentRoll = 0; 
+        let gpsWatchId = null, orientationListenerAttached = false;
+        let gpsEnabled = false, orientationEnabled = false;
+        
+        let userLocationEntity = null, accuracyCircleEntity = null;
+        let latestDeviceOrientationEventForCalib = null;
+        let compassCalibrationOffset = 0.0;
+        let lastSensorUpdateTime = 0, lastCompassWarningTime = 0, lastCompassAccuracyWarningTime = 0;
+        
+        const SENSOR_UPDATE_INTERVAL = 100; 
+        const AR_SENSOR_UPDATE_INTERVAL = 50; 
+        const eyeHeightConst = 1.6; 
+
+        const gpsBtn = document.getElementById('gpsBtn');
+        const orientationBtn = document.getElementById('orientationBtn');
+        const calibrateBtn = document.getElementById('calibrateBtn');
+        const disableTrackingBtn = document.getElementById('disableTrackingBtn');
+        
+        let sscOriginalStates = null; 
+
+        function updateButtonsState() {
+            gpsBtn.innerHTML = `<span class="icon">${gpsEnabled ? '🛰️' : '📡'}</span>${gpsEnabled ? "GPS Active" : "Enable GPS"}`;
+            orientationBtn.innerHTML = `<span class="icon">${orientationEnabled ? '🔮✨' : '🔮'}</span>${orientationEnabled ? "Magic Lens Active" : "Activate Magic Lens"}`;
+            calibrateBtn.innerHTML = `<span class="icon">🧭</span>Calibrate Lens`;
+            disableTrackingBtn.innerHTML = `<span class="icon">🚫</span>Disable All`;
+
+            gpsBtn.style.display = "block"; 
+            orientationBtn.style.display = "block"; 
+            calibrateBtn.style.display = orientationEnabled ? "flex" : "none"; 
+            disableTrackingBtn.style.display = (gpsEnabled || orientationEnabled) ? "flex" : "none";
+            
+            manageCameraControls(); 
+            viewer.scene.requestRender();
+        }
+        
+        function manageCameraControls() {
+            const ssc = viewer.scene.screenSpaceCameraController;
+            if (!sscOriginalStates && ssc.enableInputs !== undefined) { 
+                sscOriginalStates = {
+                    enableLook: ssc.enableLook, enableRotate: ssc.enableRotate,
+                    enableTilt: ssc.enableTilt, enableTranslate: ssc.enableTranslate,
+                    enableZoom: ssc.enableZoom
+                };
+            }
+
+            ssc.enableCollisionDetection = false; 
+
+            if (orientationEnabled) { 
+                ssc.enableInputs = true;
+                ssc.enableLook = false;      
+                ssc.enableRotate = false;    
+                ssc.enableTilt = true;       
+                ssc.enableTranslate = false; 
+                ssc.enableZoom = true;       
+            } else if (gpsEnabled) { 
+                ssc.enableInputs = true;
+                ssc.enableLook = true;
+                ssc.enableRotate = true;
+                ssc.enableTilt = true;
+                ssc.enableTranslate = false; 
+                ssc.enableZoom = true;
+            } else { 
+                ssc.enableInputs = true;
+                if (sscOriginalStates) { 
+                    Object.keys(sscOriginalStates).forEach(key => ssc[key] = sscOriginalStates[key]);
+                } else { 
+                    ssc.enableLook = true; ssc.enableRotate = true; ssc.enableTilt = true;
+                    ssc.enableTranslate = true; ssc.enableZoom = true;
+                }
+            }
+            viewer.scene.requestRender();
+        }
+
+
+        function handlePositionUpdate(position) {
+            const now = Date.now();
+            if (now - lastSensorUpdateTime < SENSOR_UPDATE_INTERVAL && gpsEnabled) return; 
+            lastSensorUpdateTime = now;
+            
+            lat = position.coords.latitude;
+            lon = position.coords.longitude;
+            alt = position.coords.altitude !== null ? position.coords.altitude : 30; 
+            const accuracy = position.coords.accuracy;
+
+            if (navigator.geolocation) navigator.geolocation.lastPosition = position;
+
+            updateStatus(`GPS: ${lat.toFixed(5)}, ${lon.toFixed(5)}, Alt: ${alt.toFixed(1)}m (Acc: ±${accuracy.toFixed(1)}m)`);
+            updateCameraAndMarker(position.coords); 
+        }
+
+        function handlePositionError(error) {
+            let msg = "GPS Error: ";
+            switch(error.code) {
+                case error.PERMISSION_DENIED: msg += "Permission denied."; break;
+                case error.POSITION_UNAVAILABLE: msg += "Position unavailable."; break;
+                case error.TIMEOUT: msg += "Request timed out."; break;
+                default: msg += `Unknown (Code: ${error.code}).`;
+            }
+            updateStatus(msg + " Ensure HTTPS & location services.", true);
+        }
+        
+        function updateAccuracyCircle(latitude, longitude, altitudeAtUserFeet, accuracy) {
+            if (accuracyCircleEntity) viewer.entities.remove(accuracyCircleEntity);
+            accuracyCircleEntity = null;
+            if (accuracy > 0 && accuracy < 200 && gpsEnabled) { 
+                accuracyCircleEntity = viewer.entities.add({
+                    position: Cesium.Cartesian3.fromDegrees(longitude, latitude, altitudeAtUserFeet - 0.1),
+                    ellipse: {
+                        semiMinorAxis: accuracy, semiMajorAxis: accuracy,
+                        material: Cesium.Color.RED.withAlpha(0.15), 
+                        height: altitudeAtUserFeet - 0.1, extrudedHeight: altitudeAtUserFeet,
+                        outline: true, outlineColor: Cesium.Color.RED.withAlpha(0.4),
+                        classificationType: Cesium.ClassificationType.TERRAIN 
+                    }
+                });
+            }
+        }
+
+        function startLiveGPS() {
+            if (gpsEnabled) { 
+                stopLiveGPS();
+                return;
+            }
+            updateStatus("Acquiring GPS signal...");
+            if (!("geolocation" in navigator)) {
+                updateStatus("Geolocation API not supported.", true); return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (initialPosition) => {
+                    updateStatus("GPS signal acquired.");
+                    gpsEnabled = true;
+                    handlePositionUpdate(initialPosition); 
+                    updateButtonsState();
+                    gpsWatchId = navigator.geolocation.watchPosition(handlePositionUpdate, handlePositionError,
+                        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+                    
+                    if (!orientationEnabled) { 
+                         viewer.flyTo(userLocationEntity || Cesium.Cartesian3.fromDegrees(lon, lat, alt + 150), { 
+                            duration: 2.0,
+                            offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 150)
+                        }).then(() => viewer.scene.requestRender());
+                    } else {
+                        updateCameraAndMarker(); 
+                    }
+                },
+                (error) => {
+                    handlePositionError(error); gpsEnabled = false; updateButtonsState();
+                    updateStatus("Failed to acquire GPS. Ensure HTTPS & permissions.", true);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        function stopLiveGPS() {
+            if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null; 
+            gpsEnabled = false;
+            if (accuracyCircleEntity) { viewer.entities.remove(accuracyCircleEntity); accuracyCircleEntity = null; }
+            if (userLocationEntity && !orientationEnabled) { 
+                 userLocationEntity.show = false; 
+            }
+            updateStatus("GPS tracking stopped."); 
+            updateButtonsState();
+        }
+
+        function toggleARVisuals(isActive) {
+            lensOverlay.classList.toggle('active', isActive);
+            pipelineEntities.forEach(entity => {
+                if (entity.polylineVolume && entity._arActiveMaterial && entity._originalMaterial) {
+                    entity.polylineVolume.material = isActive ? entity._arActiveMaterial : entity._originalMaterial;
+                }
+            });
+            viewer.scene.requestRender();
+        }
+        
+        function handleDeviceOrientation(event) {
+            if (!orientationEnabled) return;
+            latestDeviceOrientationEventForCalib = event;
+            const now = Date.now();
+            if (now - lastSensorUpdateTime < AR_SENSOR_UPDATE_INTERVAL && (event.alpha !== null || event.gamma !== null)) return; 
+            lastSensorUpdateTime = now;
+
+            let rawAlpha = event.alpha;
+            if (isIOS && event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
+                rawAlpha = event.webkitCompassHeading;
+                if (event.webkitCompassAccuracy !== undefined && event.webkitCompassAccuracy < 0 && Math.abs(event.webkitCompassAccuracy) > 35 ) { 
+                    if (Date.now() - (lastCompassAccuracyWarningTime || 0) > 10000) { 
+                        updateStatus("Low compass accuracy. Wave device (figure-8) to calibrate lens.", true);
+                        lastCompassAccuracyWarningTime = Date.now();
+                    }
+                }
+            }
+            if (rawAlpha === null) { 
+                if (Date.now() - (lastCompassWarningTime || 0) > 7000) {
+                    updateStatus("Compass N/A. Calibrate lens or check for interference.", true);
+                    lastCompassWarningTime = Date.now();
+                }
+            }
+            
+            let newH = rawAlpha !== null ? (360 - (rawAlpha + compassCalibrationOffset)) % 360 : currentHeading;
+            let newP = event.beta !== null ? (event.beta - 90) : currentPitch; 
+            let newR = event.gamma !== null ? event.gamma : currentRoll;
+
+            let headDiff = newH - currentHeading; 
+            if (headDiff > 180) headDiff -= 360; else if (headDiff < -180) headDiff += 360;
+            currentHeading = (currentHeading + SMOOTHING_FACTOR_H * headDiff % 360 + 360) % 360;
+            currentPitch = (1 - SMOOTHING_FACTOR_PR) * currentPitch + SMOOTHING_FACTOR_PR * newP;
+            currentRoll = (1 - SMOOTHING_FACTOR_PR) * currentRoll + SMOOTHING_FACTOR_PR * newR;
+            
+            updateCameraAndMarker(); 
+        }
+
+        function startOrientation() {
+            if (orientationEnabled) { 
+                stopOrientation();
+                return;
+            }
+            updateStatus("Activating Magic Lens (Device Orientation)...");
+            const setupListener = () => {
+                window.addEventListener(orientationEventName, handleDeviceOrientation, true);
+                orientationListenerAttached = true; 
+                orientationEnabled = true;
+                toggleARVisuals(true);
+                updateButtonsState();
+                updateStatus("Magic Lens active! Point device. Calibrate if needed.");
+                // Only call flyTo after permission is granted and viewer/camera are defined
+                const initialTargetLat = gpsEnabled ? lat : 21.1458; 
+                const initialTargetLon = gpsEnabled ? lon : 79.0882;
+                const initialTargetAlt = (gpsEnabled && alt !== null) ? alt : 30;
+                if (viewer && viewer.camera) {
+                    viewer.camera.flyTo({
+                        destination: Cesium.Cartesian3.fromDegrees(initialTargetLon, initialTargetLat, initialTargetAlt + 50),
+                        orientation: {
+                            heading: toRad(currentHeading),
+                            pitch: toRad(currentPitch > -85 ? currentPitch : -30),
+                            roll: toRad(currentRoll)
+                        },
+                        duration: 1.0
+                    }).then(() => {
+                        updateCameraAndMarker(); 
+                    });
+                }
+            };
+            if (typeof DeviceOrientationEvent !== "undefined") {
+                if (typeof DeviceOrientationEvent.requestPermission === "function") { 
+                    DeviceOrientationEvent.requestPermission()
+                        .then(r => {
+                            if (r === "granted") setupListener();
+                            else { updateStatus("Device Orientation permission denied for Magic Lens.", true); orientationEnabled = false; updateButtonsState(); }
+                        }).catch(err => {
+                            updateStatus("Orientation permission error: " + err.message, true);
+                            orientationEnabled = false; updateButtonsState();
+                        });
+                } else setupListener(); 
+            } else {
+                updateStatus("Device Orientation API not supported for Magic Lens.", true);
+                orientationEnabled = false; updateButtonsState();
+            }
+        }
+
+        function stopOrientation() {
+            if (orientationListenerAttached) window.removeEventListener(orientationEventName, handleDeviceOrientation, true);
+            orientationListenerAttached = false; 
+            orientationEnabled = false;
+            toggleARVisuals(false);
+            updateStatus("Magic Lens deactivated."); 
+            updateButtonsState();
+            if (gpsEnabled) {
+                viewer.camera.flyTo({
+                    destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt + 200),
+                    orientation: { heading: toRad(currentHeading), pitch: toRad(-45), roll: 0},
+                    duration: 1.0
+                });
+            }
+        }
+        
+        function calibrateCompass() {
+            if (!orientationEnabled) { updateStatus("Activate Magic Lens first to calibrate.", true); return; }
+            if (!latestDeviceOrientationEventForCalib) { updateStatus("No orientation data. Move device, then calibrate lens.", true); return; }
+            updateStatus("Calibrating Lens: Point device physically North, hold steady...", false); 
+            setTimeout(() => {
+                let rawAlpha = latestDeviceOrientationEventForCalib.alpha;
+                if (isIOS && latestDeviceOrientationEventForCalib.webkitCompassHeading !== undefined && latestDeviceOrientationEventForCalib.webkitCompassHeading !== null) {
+                    rawAlpha = latestDeviceOrientationEventForCalib.webkitCompassHeading;
+                }
+                if (rawAlpha === null) {
+                    updateStatus("Lens calibration failed: No compass heading. Check sensors/interference.", true); return;
+                }
+                compassCalibrationOffset = (-rawAlpha % 360 + 360) % 360; 
+                updateStatus(`Lens calibrated. Offset: ${compassCalibrationOffset.toFixed(1)}°. Current direction set as North.`, false);
+                currentHeading = 0; 
+                handleDeviceOrientation(latestDeviceOrientationEventForCalib); 
+            }, 1500); 
+        }
+        calibrateBtn.onclick = calibrateCompass;
+
+        function updateCameraAndMarker(gpsFullCoords = null) {
+            const currentGpsLat = gpsFullCoords ? gpsFullCoords.latitude : lat;
+            const currentGpsLon = gpsFullCoords ? gpsFullCoords.longitude : lon;
+            const currentGpsAltFromSensor = gpsFullCoords ? gpsFullCoords.altitude : alt; 
+            const currentGpsAccuracy = gpsFullCoords ? gpsFullCoords.accuracy : (navigator.geolocation.lastPosition?.coords.accuracy || 0);
+
+            const cartographicGpsGroundPos = [Cesium.Cartographic.fromDegrees(currentGpsLon, currentGpsLat)];
+            let markerAltPromise; 
+
+            if (currentGpsAltFromSensor !== null && isFinite(currentGpsAltFromSensor) && currentGpsAltFromSensor > -1000 && currentGpsAltFromSensor < 9000) {
+                markerAltPromise = Promise.resolve(currentGpsAltFromSensor);
+            } else if (viewer.terrainProvider.ready) {
+                markerAltPromise = Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, cartographicGpsGroundPos)
+                    .then(s => (s && s[0] && s[0].height !== undefined) ? s[0].height : 0) 
+                    .catch(() => 0); 
+            } else {
+                markerAltPromise = Promise.resolve(0); 
+            }
+
+
+            markerAltPromise.then(baseMarkerAltitudeAtGps => { 
+                if (gpsEnabled) {
+                    const markerPosition = Cesium.Cartesian3.fromDegrees(currentGpsLon, currentGpsLat, baseMarkerAltitudeAtGps);
+                    if (!userLocationEntity) {
+                        userLocationEntity = viewer.entities.add({
+                            position: markerPosition,
+                            point: { pixelSize: 12, color: Cesium.Color.DEEPSKYBLUE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2.5, disableDepthTestDistance: Infinity },
+                            label: { text: 'You', font: 'bold 15px sans-serif', fillColor: Cesium.Color.DEEPSKYBLUE, outlineColor: Cesium.Color.WHITE, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Infinity }
+                        });
+                    } else {
+                        userLocationEntity.position = markerPosition; 
+                    }
+                    userLocationEntity.show = true;
+                    updateAccuracyCircle(currentGpsLat, currentGpsLon, baseMarkerAltitudeAtGps, currentGpsAccuracy);
+                } else if (userLocationEntity) { 
+                    userLocationEntity.show = false;
+                }
+
+                if (orientationEnabled) {
+                    const currentCamCarto = viewer.camera.positionCartographic;
+                    const camLatForAR = gpsEnabled ? currentGpsLat : lat;
+                    const camLonForAR = gpsEnabled ? currentGpsLon : lon;
+                    
+                    const camHeightForAR = (currentCamCarto && isFinite(currentCamCarto.height)) ? currentCamCarto.height : baseMarkerAltitudeAtGps + 10; 
+                    
+                    const camDestToSet = Cesium.Cartesian3.fromDegrees(camLonForAR, camLatForAR, camHeightForAR);
+                    const camOrientationToSet = { heading: toRad(currentHeading), pitch: toRad(currentPitch), roll: toRad(currentRoll) };
+                    
+                    viewer.camera.setView({ destination: camDestToSet, orientation: camOrientationToSet });
+                }
+                viewer.scene.requestRender();
+            });
+        }
+
+        gpsBtn.onclick = startLiveGPS; 
+        orientationBtn.onclick = startOrientation; 
+
+        disableTrackingBtn.onclick = function() {
+            if (gpsEnabled) stopLiveGPS(); 
+            if (orientationEnabled) stopOrientation();
+            updateStatus("All tracking disabled. Manual camera control restored.");
+        };
+        
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt + 1000), 
+            orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-60), roll: 0.0 },
+            duration: 1.5, 
+            complete: () => { 
+                updateStatus("Revelo Magic Lens ready. Activate features to explore."); 
+                viewer.scene.requestRender();
+            }
+        });
+
+        function checkInitialFeatures() {
+            if (!("geolocation" in navigator)) {
+                gpsBtn.disabled = true; gpsBtn.title = "GPS Not Supported"; 
+            }
+            if (typeof DeviceOrientationEvent === "undefined") {
+                orientationBtn.disabled = true; orientationBtn.title = "Device Orientation Not Supported"; 
+                calibrateBtn.disabled = true; 
+            }
+            updateButtonsState(); 
+        }
+
+        window.addEventListener('load', function() {
+            checkInitialFeatures();
+            if (navigator.permissions) {
+                navigator.permissions.query({name:'geolocation'}).then(p => {
+                    if (p.state === 'granted') updateStatus("GPS permission previously granted.", false);
+                    else if (p.state === 'prompt') updateStatus("GPS permission will be prompted.", false); 
+                    else updateStatus("GPS permission denied. Check browser/OS settings.", true);
+                }).catch(e => console.warn("Permissions API for geolocation not fully supported or error:", e));
+            }
+            manageCameraControls(); 
+            viewer.scene.requestRender(); 
+        });
+    </script>
+</body>
+</html>
