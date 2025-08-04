@@ -1,0 +1,1781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+    <title>Underground Pipeline Explorer - Street View Style</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.129/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.129/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body, #cesiumContainer {
+            margin: 0; 
+            padding: 0; 
+            height: 100%; 
+            width: 100%;
+            overflow: hidden; 
+            touch-action: manipulation;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Main Control Panel */
+        #controlPanel {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            pointer-events: none;
+        }
+
+        /* Icon Button Styles */
+        .icon-button {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            position: relative;
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .icon-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+        }
+
+        .icon-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .icon-button svg {
+            width: 28px;
+            height: 28px;
+            fill: white;
+        }
+
+        /* GPS Button */
+        .gps-button {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+        }
+        .gps-button.active {
+            background: linear-gradient(135deg, #2196F3, #1976D2);
+        }
+
+        /* AR Button */
+        .ar-button {
+            background: linear-gradient(135deg, #FF9800, #F57C00);
+        }
+        .ar-button.active {
+            background: linear-gradient(135deg, #9C27B0, #7B1FA2);
+        }
+
+        /* Settings Dropdown Button */
+        .settings-button {
+            background: linear-gradient(135deg, #607D8B, #455A64);
+        }
+        .settings-button.active {
+            background: linear-gradient(135deg, #795548, #5D4037);
+        }
+
+        /* Eye Toggle Button - Always visible */
+        .eye-button {
+            background: linear-gradient(135deg, #3F51B5, #303F9F);
+            position: fixed !important;
+            top: 15px;
+            right: 15px;
+            z-index: 1000 !important;
+        }
+        .eye-button.hidden-mode {
+            background: linear-gradient(135deg, #F44336, #D32F2F);
+        }
+
+        /* Street View Mode Button */
+        .streetview-button {
+            background: linear-gradient(135deg, #FF5722, #E64A19);
+        }
+        .streetview-button.active {
+            background: linear-gradient(135deg, #673AB7, #512DA8);
+        }
+
+        /* Settings Dropdown */
+        .settings-dropdown {
+            position: absolute;
+            top: 68px;
+            left: 0;
+            background: rgba(42, 42, 42, 0.95);
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 320px;
+            color: white;
+            transform: translateY(-10px);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            pointer-events: auto;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+
+        .settings-dropdown.visible {
+            transform: translateY(0);
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .settings-dropdown .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .settings-dropdown .setting-row:last-child {
+            border-bottom: none;
+        }
+
+        .settings-dropdown label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .settings-dropdown input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .settings-dropdown input[type="range"] {
+            width: 100px;
+            margin: 0 8px;
+        }
+
+        .settings-dropdown input[type="text"] {
+            width: 50px;
+            padding: 4px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #333;
+            color: white;
+            text-align: center;
+        }
+
+        /* Status Display */
+        #statusDisplay {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            right: 15px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            text-align: center;
+            pointer-events: none;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+
+        #statusDisplay.error {
+            background: rgba(244, 67, 54, 0.9);
+        }
+
+        #statusDisplay.success {
+            background: rgba(76, 175, 80, 0.9);
+        }
+
+        /* Pipeline Info Panel */
+        #pipelineInfo {
+            position: absolute;
+            top: 15px;
+            right: 80px;
+            z-index: 100;
+            background: rgba(42, 42, 42, 0.95);
+            color: white;
+            padding: 16px;
+            border-radius: 12px;
+            max-width: 300px;
+            transform: translateX(10px);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            pointer-events: auto;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+
+        #pipelineInfo.visible {
+            transform: translateX(0);
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #pipelineInfo h3 {
+            margin: 0 0 12px 0;
+            color: #64B5F6;
+            font-size: 16px;
+        }
+
+        #pipelineInfo .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 14px;
+        }
+
+        #pipelineInfo .info-label {
+            font-weight: 600;
+            color: #E0E0E0;
+        }
+
+        #pipelineInfo .info-value {
+            color: #FFEB3B;
+        }
+
+        #pipelineInfo .close-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: none;
+            border: none;
+            color: #ccc;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        #pipelineInfo .close-btn:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+
+        /* Street View Controls */
+        #streetViewControls {
+            position: absolute;
+            bottom: 80px;
+            left: 15px;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #streetViewControls.visible {
+            display: flex;
+        }
+
+        .street-control-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(42, 42, 42, 0.9);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+
+        .street-control-btn:hover {
+            background: rgba(62, 62, 62, 0.9);
+            border-color: rgba(255,255,255,0.5);
+            transform: scale(1.05);
+        }
+
+        /* Zoom Controls */
+        #zoomControls {
+            position: absolute;
+            right: 15px;
+            bottom: 80px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .zoom-button {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(42, 42, 42, 0.9);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+
+        .zoom-button:hover {
+            background: rgba(62, 62, 62, 0.9);
+            border-color: rgba(255,255,255,0.5);
+            transform: scale(1.05);
+        }
+
+        .zoom-button:active {
+            transform: scale(0.95);
+        }
+
+        /* Base Layer Picker - Enhanced */
+        .cesium-viewer-baseLayerPickerContainer {
+            position: absolute !important;
+            top: 15px !important;
+            right: 80px !important;
+            z-index: 200 !important;
+        }
+
+        .cesium-baseLayerPicker-dropDown {
+            background: rgba(42, 42, 42, 0.95) !important;
+            border: 1px solid rgba(255,255,255,0.2) !important;
+            border-radius: 8px !important;
+            backdrop-filter: blur(10px) !important;
+        }
+
+        .cesium-baseLayerPicker-item {
+            color: white !important;
+            border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+        }
+
+        .cesium-baseLayerPicker-item:hover {
+            background: rgba(255,255,255,0.1) !important;
+        }
+
+        /* Pipeline Enhancement Styles */
+        .pipeline-label {
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            border: 1px solid #fff;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            #controlPanel {
+                top: 10px;
+                left: 10px;
+            }
+
+            .settings-dropdown {
+                min-width: 280px;
+            }
+
+            #pipelineInfo {
+                top: 10px;
+                right: 70px;
+                max-width: 250px;
+            }
+
+            #statusDisplay {
+                bottom: 10px;
+                left: 10px;
+                right: 10px;
+                font-size: 12px;
+            }
+
+            #zoomControls {
+                right: 10px;
+                bottom: 60px;
+            }
+
+            .eye-button {
+                top: 10px;
+                right: 10px;
+            }
+
+            .cesium-viewer-baseLayerPickerContainer {
+                right: 70px !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .icon-button {
+                width: 50px;
+                height: 50px;
+            }
+
+            .icon-button svg {
+                width: 24px;
+                height: 24px;
+            }
+
+            .settings-dropdown {
+                min-width: 250px;
+                font-size: 13px;
+            }
+
+            #pipelineInfo {
+                max-width: 200px;
+                font-size: 13px;
+            }
+
+            .zoom-button, .street-control-btn {
+                width: 44px;
+                height: 44px;
+                font-size: 18px;
+            }
+        }
+
+        /* Landscape mode optimization */
+        @media (orientation: landscape) and (max-height: 500px) {
+            #controlPanel {
+                flex-direction: row;
+                top: 10px;
+                left: 10px;
+            }
+
+            .settings-dropdown {
+                top: 58px;
+                left: 0;
+            }
+
+            #pipelineInfo {
+                top: 10px;
+            }
+
+            #zoomControls {
+                right: 10px;
+                bottom: 50px;
+            }
+        }
+
+        /* Hide default Cesium UI elements except base layer picker */
+        .cesium-viewer-toolbar,
+        .cesium-viewer-geocoderContainer,
+        .cesium-viewer-homeButtonContainer,
+        .cesium-viewer-sceneModePicker,
+        .cesium-viewer-projectionPickerContainer,
+        .cesium-viewer-navigationHelpButtonContainer,
+        .cesium-viewer-fullscreenButtonContainer,
+        .cesium-viewer-vrButtonContainer {
+            display: none !important;
+        }
+
+        .cesium-widget-credits {
+            display: none !important;
+        }
+
+        /* Underground mode visual indicators */
+        .underground-indicator {
+            position: absolute;
+            top: 80px;
+            left: 15px;
+            background: rgba(244, 67, 54, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 100;
+            display: none;
+        }
+
+        .underground-indicator.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<!-- Underground Mode Indicator -->
+<div id="undergroundIndicator" class="underground-indicator">
+    🏠 UNDERGROUND MODE - <span id="depthIndicator">30m</span>
+</div>
+
+<!-- Main Control Panel -->
+<div id="controlPanel">
+    <!-- GPS Button -->
+    <button id="gpsButton" class="icon-button gps-button" title="Enable GPS Tracking">
+        <svg viewBox="0 0 24 24">
+            <path d="M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8M3.05,13H1V11H3.05C3.5,6.83 6.83,3.5 11,3.05V1H13V3.05C17.17,3.5 20.5,6.83 20.95,11H23V13H20.95C20.5,17.17 17.17,20.5 13,20.95V23H11V20.95C6.83,20.5 3.5,17.17 3.05,13M12,5A7,7 0 0,0 5,12A7,7 0 0,0 12,19A7,7 0 0,0 19,12A7,7 0 0,0 12,5Z"/>
+        </svg>
+    </button>
+
+    <!-- AR Button -->
+    <button id="arButton" class="icon-button ar-button" title="Enable AR Mode">
+        <svg viewBox="0 0 24 24">
+            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+        </svg>
+    </button>
+
+    <!-- Street View Button -->
+    <button id="streetViewButton" class="icon-button streetview-button" title="Enable Street View Mode">
+        <svg viewBox="0 0 24 24">
+            <path d="M12,2C13.1,2 14,2.9 14,4C14,5.1 13.1,6 12,6C10.9,6 10,5.1 10,4C10,2.9 10.9,2 12,2M21,9V7L15,1H9V3H7V7H3V9H7V21A2,2 0 0,0 9,23H15A2,2 0 0,0 17,21V9H21M15,9V19H9V9H15Z"/>
+        </svg>
+    </button>
+
+    <!-- Settings Button -->
+    <button id="settingsButton" class="icon-button settings-button" title="Settings">
+        <svg viewBox="0 0 24 24">
+            <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+        </svg>
+    </button>
+
+    <!-- Settings Dropdown -->
+    <div id="settingsDropdown" class="settings-dropdown">
+        <div class="setting-row">
+            <label>Show Pipelines</label>
+            <input type="checkbox" id="showPipelines" checked>
+        </div>
+        <div class="setting-row">
+            <label>Pipeline Labels</label>
+            <input type="checkbox" id="showPipelineLabels" checked>
+        </div>
+        <div class="setting-row">
+            <label>Underground Mode</label>
+            <input type="checkbox" id="undergroundMode">
+        </div>
+        <div class="setting-row">
+            <label>Translucent Terrain</label>
+            <input type="checkbox" id="translucencyEnabled">
+        </div>
+        <div class="setting-row">
+            <label>Terrain Alpha</label>
+            <input type="range" id="terrainAlpha" min="0" max="1" step="0.01" value="0.8">
+            <input type="text" id="terrainAlphaValue" value="0.8" readonly>
+        </div>
+        <div class="setting-row">
+            <label>Underground Depth</label>
+            <input type="range" id="undergroundDepth" min="5" max="100" step="5" value="30">
+            <input type="text" id="undergroundDepthValue" value="30" readonly>
+        </div>
+        <div class="setting-row">
+            <label>Pipeline Thickness</label>
+            <input type="range" id="pipelineThickness" min="0.1" max="5" step="0.1" value="1.5">
+            <input type="text" id="pipelineThicknessValue" value="1.5" readonly>
+        </div>
+        <div class="setting-row">
+            <label>Max View Distance</label>
+            <input type="range" id="maxViewDistance" min="1000" max="100000" step="1000" value="50000">
+            <input type="text" id="maxViewDistanceValue" value="50000" readonly>
+        </div>
+    </div>
+</div>
+
+<!-- Eye Toggle Button - Always visible and separate -->
+<button id="eyeButton" class="icon-button eye-button" title="Toggle UI Visibility">
+    <svg id="eyeIcon" viewBox="0 0 24 24">
+        <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+    </svg>
+    <svg id="eyeOffIcon" viewBox="0 0 24 24" style="display: none;">
+        <path d="M11.83,9L15,12.16C15,12.11 15,12.05 15,12A3,3 0 0,0 12,9C11.94,9 11.89,9 11.83,9M7.53,9.8L9.08,11.35C9.03,11.56 9,11.77 9,12A3,3 0 0,0 12,15C12.22,15 12.44,14.97 12.65,14.92L14.2,16.47C13.53,16.8 12.79,17 12,17A5,5 0 0,1 7,12C7,11.21 7.2,10.47 7.53,9.8M2,4.27L4.28,6.55L4.73,7C3.08,8.3 1.78,10 1,12C2.73,16.39 7,19.5 12,19.5C13.55,19.5 15.03,19.2 16.38,18.66L16.81,19.09L19.73,22L21,20.73L3.27,3M12,7A5,5 0 0,1 17,12C17,12.64 16.87,13.26 16.64,13.82L19.57,16.75C21.07,15.5 22.27,13.86 23,12C21.27,7.61 17,4.5 12,4.5C10.6,4.5 9.26,4.75 8,5.2L10.17,7.35C10.76,7.13 11.37,7 12,7Z"/>
+    </svg>
+</button>
+
+<!-- Pipeline Information Panel -->
+<div id="pipelineInfo">
+    <button class="close-btn" onclick="hidePipelineInfo()">×</button>
+    <h3 id="pipelineName">Pipeline Information</h3>
+    <div class="info-row">
+        <span class="info-label">Type:</span>
+        <span class="info-value" id="pipelineType">-</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Depth:</span>
+        <span class="info-value" id="pipelineDepth">-</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Material:</span>
+        <span class="info-value" id="pipelineMaterial">-</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Diameter:</span>
+        <span class="info-value" id="pipelineDiameter">-</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Status:</span>
+        <span class="info-value" id="pipelineStatus">Active</span>
+    </div>
+</div>
+
+<!-- Street View Controls -->
+<div id="streetViewControls">
+    <button class="street-control-btn" id="forwardBtn" title="Move Forward">↑</button>
+    <button class="street-control-btn" id="backwardBtn" title="Move Backward">↓</button>
+    <button class="street-control-btn" id="leftBtn" title="Turn Left">←</button>
+    <button class="street-control-btn" id="rightBtn" title="Turn Right">→</button>
+</div>
+
+<!-- Zoom Controls -->
+<div id="zoomControls">
+    <button class="zoom-button" id="zoomInBtn" title="Zoom In">+</button>
+    <button class="zoom-button" id="zoomOutBtn" title="Zoom Out">−</button>
+</div>
+
+<!-- Status Display -->
+<div id="statusDisplay">Initializing Underground Pipeline Explorer...</div>
+
+<script>
+// Initialize Cesium with proper token
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5Y2ZiMzU0Mi00NjkyLTQxZjctOGNjZC02YjgyYzliOTEwNGYiLCJpZCI6Mjk2ODk1LCJpYXQiOjE3NDc2NTc5MzZ9.Mb95-v_3Pm4NQQohnck02L-zmHD4SWj5vv57m0fP4ig';
+
+// Global variables
+let viewer;
+let gpsEnabled = false;
+let arEnabled = false;
+let streetViewEnabled = false;
+let uiVisible = true;
+let gpsWatchId = null;
+let orientationListenerActive = false;
+let undergroundMode = false;
+let pipelineEntities = [];
+let userLocationEntity = null;
+let soilLayer = null;
+let pipelineLabels = [];
+
+// Enhanced pipeline settings
+let pipelineThickness = 1.5;
+let maxViewDistance = 50000;
+let showPipelineLabels = true;
+
+// User location tracking
+let userLat = 21.1458;
+let userLon = 79.0882;
+let userAlt = 300;
+
+// AR and Street View orientation variables
+let targetHeading = 0;
+let targetPitch = -30;
+let targetRoll = 0;
+let smoothHeading = 0;
+let smoothPitch = -30;
+let smoothRoll = 0;
+let compassOffset = 0;
+
+// Street View movement settings
+let streetViewHeight = 1.7; // Human eye level
+let moveSpeed = 10; // meters per step
+let turnSpeed = 15; // degrees per turn
+
+// Initialize the application
+function initializeApp() {
+    updateStatus("Initializing Cesium viewer...");
+
+    // Create Cesium viewer with optimized settings
+    viewer = new Cesium.Viewer('cesiumContainer', {
+        baseLayerPicker: true,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        animation: false,
+        timeline: false,
+        fullscreenButton: false,
+        vrButton: false,
+        infoBox: false,
+        selectionIndicator: false,
+        shouldAnimate: true,
+        terrainProvider: Cesium.Terrain.fromWorldTerrain(),
+        requestRenderMode: true,
+        maximumRenderTimeChange: Infinity
+    });
+
+    // Configure globe for enhanced underground viewing
+    const globe = viewer.scene.globe;
+    globe.depthTestAgainstTerrain = false;
+    globe.undergroundColor = Cesium.Color.fromCssColorString('#654321').withAlpha(0.8);
+    globe.enableLighting = true;
+    globe.ellipsoid = Cesium.Ellipsoid.WGS84;
+
+    // Enhanced camera settings for better performance
+    viewer.scene.camera.frustum.near = 0.01;
+    viewer.scene.camera.frustum.fov = Cesium.Math.toRadians(75);
+    
+    // Disable collision detection for underground navigation
+    viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+    
+    // Enhanced fog and atmosphere for better underground visualization
+    viewer.scene.fog.enabled = true;
+    viewer.scene.fog.density = 0.0001;
+    viewer.scene.fog.screenSpaceErrorFactor = 2.0;
+    viewer.scene.skyAtmosphere.show = true;
+
+    // Configure rendering for better pipeline visibility
+    viewer.scene.globe.maximumScreenSpaceError = 1;
+    viewer.scene.globe.tileCacheSize = 1000;
+
+    // Load pipeline data
+    loadPipelineData();
+
+    // Set up event handlers
+    setupEventHandlers();
+
+    // Initial camera position
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(79.0882, 21.1458, 1000),
+        orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-45),
+            roll: 0
+        },
+        duration: 2.0,
+        complete: function() {
+            updateStatus("Ready! Enable GPS, AR, or Street View mode to explore underground pipelines.");
+        }
+    });
+}
+
+// Enhanced pipeline loading with better visibility controls
+function loadPipelineData() {
+    updateStatus("Loading pipeline data...");
+
+    const pipelineConfigs = [
+        {
+            url: "https://varun:8443/geoserver/Hilltop_pipelines/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=Hilltop_pipelines%3APOLYLINE&maxFeatures=50&outputFormat=application%2Fjson",
+            color: Cesium.Color.ORANGERED,
+            depth: -20,
+            type: "Gas Pipeline",
+            material: "Steel",
+            diameter: "12 inches"
+        },
+        {
+            url: "https://varun:8443/geoserver/Hilltop_pipelines/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=Hilltop_pipelines%3AHilltop_pipeline2&maxFeatures=50&outputFormat=application%2Fjson",
+            color: Cesium.Color.DEEPSKYBLUE,
+            depth: -15,
+            type: "Water Pipeline",
+            material: "PVC",
+            diameter: "8 inches"
+        },
+        {
+            url: "https://varun:8443/geoserver/Hilltop_pipelines/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=Hilltop_pipelines%3AHilltop_Pipeline3&maxFeatures=50&outputFormat=application%2Fjson",
+            color: Cesium.Color.LIME,
+            depth: -25,
+            type: "Fiber Optic Cable",
+            material: "Plastic",
+            diameter: "2 inches"
+        }
+    ];
+
+    let loadedCount = 0;
+    const totalPipelines = pipelineConfigs.length;
+
+    pipelineConfigs.forEach(config => {
+        fetch(config.url)
+            .then(response => response.json())
+            .then(data => {
+                if (data.features && data.features.length > 0) {
+                    data.features.forEach(feature => {
+                        if (feature.geometry && feature.geometry.coordinates) {
+                            createEnhancedPipelineEntity(feature.geometry.coordinates, config);
+                        }
+                    });
+                }
+                
+                loadedCount++;
+                if (loadedCount === totalPipelines) {
+                    updateStatus(`Loaded ${pipelineEntities.length} pipeline segments. Ready for exploration!`, "success");
+                    setTimeout(() => {
+                        updateStatus("Use GPS, AR, or Street View modes to explore underground pipelines.");
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                console.error('Pipeline loading error:', error);
+                updateStatus(`Failed to load pipeline: ${config.type}`, "error");
+                loadedCount++;
+            });
+    });
+}
+
+// Enhanced pipeline creation with better visibility
+function createEnhancedPipelineEntity(coordinates, config) {
+    if (!coordinates || coordinates.length < 2) return;
+
+    let positions;
+    if (coordinates[0] && Array.isArray(coordinates[0]) && typeof coordinates[0][0] === 'number') {
+        positions = coordinates.map(coord => 
+            Cesium.Cartesian3.fromDegrees(coord[0], coord[1], config.depth)
+        );
+    } else {
+        coordinates.forEach(lineString => {
+            if (Array.isArray(lineString) && lineString.length > 1) {
+                positions = lineString.map(coord => 
+                    Cesium.Cartesian3.fromDegrees(coord[0], coord[1], config.depth)
+                );
+                createSingleEnhancedPipeline(positions, config);
+            }
+        });
+        return;
+    }
+
+    createSingleEnhancedPipeline(positions, config);
+}
+
+function createSingleEnhancedPipeline(positions, config) {
+    // Create enhanced tube-like pipeline with better visibility
+    const pipelineEntity = viewer.entities.add({
+        name: config.type,
+        polylineVolume: {
+            positions: positions,
+            shape: createPipeShape(pipelineThickness),
+            material: config.color.withAlpha(0.95),
+            outline: true,
+            outlineColor: config.color.brighten(0.3, new Cesium.Color()),
+            cornerType: Cesium.CornerType.ROUNDED,
+            extrudedHeight: 0,
+            // Remove distance display condition to prevent disappearing
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, maxViewDistance),
+            // Enhanced visibility options
+            shadows: Cesium.ShadowMode.ENABLED,
+            classificationType: Cesium.ClassificationType.BOTH
+        },
+        properties: {
+            type: config.type,
+            depth: Math.abs(config.depth) + "m underground",
+            material: config.material,
+            diameter: config.diameter,
+            color: config.color
+        }
+    });
+
+    pipelineEntities.push(pipelineEntity);
+
+    // Add pipeline labels if enabled
+    if (showPipelineLabels) {
+        addPipelineLabel(positions, config);
+    }
+}
+
+function addPipelineLabel(positions, config) {
+    if (positions.length === 0) return;
+    
+    // Add label at the middle of the pipeline
+    const midIndex = Math.floor(positions.length / 2);
+    const labelPosition = positions[midIndex];
+    
+    const labelEntity = viewer.entities.add({
+        position: labelPosition,
+        label: {
+            text: config.type,
+            font: '14pt Arial',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -30),
+            scaleByDistance: new Cesium.NearFarScalar(0, 1.0, 1000, 0.3),
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5000),
+            heightReference: Cesium.HeightReference.NONE,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+    });
+    
+    pipelineLabels.push(labelEntity);
+}
+
+// Create circular pipe shape with adjustable thickness
+function createPipeShape(radius) {
+    const shape = [];
+    const segments = 16; // More segments for smoother pipes
+    for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        shape.push(new Cesium.Cartesian2(
+            radius * Math.cos(angle),
+            radius * Math.sin(angle)
+        ));
+    }
+    return shape;
+}
+
+// Enhanced event handlers
+function setupEventHandlers() {
+    // Pipeline click handler
+    viewer.screenSpaceEventHandler.setInputAction(function(event) {
+        if (arEnabled || streetViewEnabled) return;
+        
+        const picked = viewer.scene.pick(event.position);
+        if (picked && picked.id && picked.id.properties) {
+            showPipelineInfo(picked.id);
+        } else {
+            hidePipelineInfo();
+        }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+    // Control button handlers
+    document.getElementById('gpsButton').onclick = toggleGPS;
+    document.getElementById('arButton').onclick = toggleAR;
+    document.getElementById('streetViewButton').onclick = toggleStreetView;
+    document.getElementById('settingsButton').onclick = toggleSettings;
+    document.getElementById('eyeButton').onclick = toggleUIVisibility;
+
+    // Zoom controls
+    document.getElementById('zoomInBtn').onclick = () => zoomCamera(0.7);
+    document.getElementById('zoomOutBtn').onclick = () => zoomCamera(1.3);
+
+    // Street View controls
+    document.getElementById('forwardBtn').onclick = () => moveStreetView('forward');
+    document.getElementById('backwardBtn').onclick = () => moveStreetView('backward');
+    document.getElementById('leftBtn').onclick = () => turnStreetView('left');
+    document.getElementById('rightBtn').onclick = () => turnStreetView('right');
+
+    // Settings handlers
+    document.getElementById('showPipelines').onchange = updatePipelineVisibility;
+    document.getElementById('showPipelineLabels').onchange = updatePipelineLabels;
+    document.getElementById('undergroundMode').onchange = toggleUndergroundMode;
+    document.getElementById('translucencyEnabled').onchange = updateGlobeSettings;
+    document.getElementById('terrainAlpha').oninput = updateTerrainAlpha;
+    document.getElementById('undergroundDepth').oninput = updateUndergroundDepth;
+    document.getElementById('pipelineThickness').oninput = updatePipelineThickness;
+    document.getElementById('maxViewDistance').oninput = updateMaxViewDistance;
+
+    // Close settings when clicking outside
+    document.addEventListener('click', function(event) {
+        const settingsBtn = document.getElementById('settingsButton');
+        const settingsDropdown = document.getElementById('settingsDropdown');
+        
+        if (!settingsBtn.contains(event.target) && !settingsDropdown.contains(event.target)) {
+            settingsDropdown.classList.remove('visible');
+            settingsBtn.classList.remove('active');
+        }
+    });
+
+    // Keyboard controls for street view
+    document.addEventListener('keydown', function(event) {
+        if (streetViewEnabled) {
+            switch(event.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    moveStreetView('forward');
+                    event.preventDefault();
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    moveStreetView('backward');
+                    event.preventDefault();
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    turnStreetView('left');
+                    event.preventDefault();
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    turnStreetView('right');
+                    event.preventDefault();
+                    break;
+            }
+        }
+    });
+
+    // Screen orientation change handler
+    window.addEventListener('orientationchange', function() {
+        setTimeout(() => {
+            viewer.resize();
+            viewer.scene.requestRender();
+        }, 100);
+    });
+
+    // Prevent context menu
+    document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+}
+
+// Street View functionality
+function toggleStreetView() {
+    if (streetViewEnabled) {
+        stopStreetView();
+    } else {
+        startStreetView();
+    }
+}
+
+function startStreetView() {
+    if (!gpsEnabled) {
+        updateStatus("Enable GPS first for Street View mode", "error");
+        return;
+    }
+
+    streetViewEnabled = true;
+    updateStreetViewButton();
+    
+    // Show street view controls
+    document.getElementById('streetViewControls').classList.add('visible');
+    
+    // Set street view camera position
+    const streetViewPosition = Cesium.Cartesian3.fromDegrees(
+        userLon, 
+        userLat, 
+        streetViewHeight
+    );
+    
+    viewer.camera.setView({
+        destination: streetViewPosition,
+        orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-10), // Slightly looking down
+            roll: 0
+        }
+    });
+    
+    // Disable default camera controls
+    viewer.scene.screenSpaceCameraController.enableRotate = true; // Allow looking around
+    viewer.scene.screenSpaceCameraController.enableTranslate = false; // Disable movement
+    viewer.scene.screenSpaceCameraController.enableZoom = true; // Allow zoom
+    viewer.scene.screenSpaceCameraController.enableTilt = true; // Allow tilt
+    
+    updateStatus("Street View mode active! Use controls or WASD keys to navigate.", "success");
+}
+
+function stopStreetView() {
+    streetViewEnabled = false;
+    updateStreetViewButton();
+    
+    // Hide street view controls
+    document.getElementById('streetViewControls').classList.remove('visible');
+    
+    // Restore default camera controls
+    viewer.scene.screenSpaceCameraController.enableRotate = true;
+    viewer.scene.screenSpaceCameraController.enableTranslate = true;
+    viewer.scene.screenSpaceCameraController.enableZoom = true;
+    viewer.scene.screenSpaceCameraController.enableTilt = true;
+    
+    updateStatus("Street View mode disabled");
+}
+
+function moveStreetView(direction) {
+    if (!streetViewEnabled) return;
+    
+    const camera = viewer.camera;
+    const heading = camera.heading;
+    
+    let deltaX = 0;
+    let deltaY = 0;
+    
+    switch(direction) {
+        case 'forward':
+            deltaX = Math.sin(heading) * moveSpeed;
+            deltaY = Math.cos(heading) * moveSpeed;
+            break;
+        case 'backward':
+            deltaX = -Math.sin(heading) * moveSpeed;
+            deltaY = -Math.cos(heading) * moveSpeed;
+            break;
+    }
+    
+    // Update user position
+    const currentPos = camera.positionCartographic;
+    const newLon = Cesium.Math.toDegrees(currentPos.longitude) + (deltaX / 111320); // Rough conversion
+    const newLat = Cesium.Math.toDegrees(currentPos.latitude) + (deltaY / 111320);
+    
+    userLon = newLon;
+    userLat = newLat;
+    
+    // Move camera
+    const newPosition = Cesium.Cartesian3.fromDegrees(newLon, newLat, streetViewHeight);
+    camera.setView({
+        destination: newPosition,
+        orientation: {
+            heading: camera.heading,
+            pitch: camera.pitch,
+            roll: camera.roll
+        }
+    });
+    
+    updateUserLocation();
+}
+
+function turnStreetView(direction) {
+    if (!streetViewEnabled) return;
+    
+    const camera = viewer.camera;
+    const turnAmount = Cesium.Math.toRadians(turnSpeed);
+    
+    let newHeading = camera.heading;
+    
+    switch(direction) {
+        case 'left':
+            newHeading -= turnAmount;
+            break;
+        case 'right':
+            newHeading += turnAmount;
+            break;
+    }
+    
+    camera.setView({
+        destination: camera.position,
+        orientation: {
+            heading: newHeading,
+            pitch: camera.pitch,
+            roll: camera.roll
+        }
+    });
+}
+
+function updateStreetViewButton() {
+    const button = document.getElementById('streetViewButton');
+    if (streetViewEnabled) {
+        button.classList.add('active');
+        button.title = 'Disable Street View Mode';
+    } else {
+        button.classList.remove('active');
+        button.title = 'Enable Street View Mode';
+    }
+}
+
+// GPS functionality (enhanced)
+function toggleGPS() {
+    if (gpsEnabled) {
+        stopGPS();
+    } else {
+        startGPS();
+    }
+}
+
+function startGPS() {
+    if (!navigator.geolocation) {
+        updateStatus("GPS not supported on this device", "error");
+        return;
+    }
+
+    updateStatus("Requesting GPS permission...");
+
+    navigator.geolocation.getCurrentPosition(
+        function(position) {
+            gpsEnabled = true;
+            userLat = position.coords.latitude;
+            userLon = position.coords.longitude;
+            userAlt = position.coords.altitude || 300;
+            
+            updateUserLocation();
+            updateGPSButton();
+            
+            gpsWatchId = navigator.geolocation.watchPosition(
+                updateGPSPosition,
+                handleGPSError,
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 1000
+                }
+            );
+            
+            updateStatus(`GPS enabled. Location: ${userLat.toFixed(5)}, ${userLon.toFixed(5)}`, "success");
+            
+            if (!arEnabled && !streetViewEnabled) {
+                viewer.camera.flyTo({
+                    destination: Cesium.Cartesian3.fromDegrees(userLon, userLat, userAlt + 200),
+                    orientation: {
+                        heading: 0,
+                        pitch: Cesium.Math.toRadians(-45),
+                        roll: 0
+                    },
+                    duration: 2.0
+                });
+            }
+        },
+        handleGPSError,
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 60000
+        }
+    );
+}
+
+function stopGPS() {
+    if (gpsWatchId) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+    }
+
+    gpsEnabled = false;
+    updateGPSButton();
+
+    if (userLocationEntity) {
+        viewer.entities.remove(userLocationEntity);
+        userLocationEntity = null;
+    }
+
+    // Also stop AR and Street View if GPS is disabled
+    if (arEnabled) stopAR();
+    if (streetViewEnabled) stopStreetView();
+
+    updateStatus("GPS disabled");
+}
+
+function updateGPSPosition(position) {
+    userLat = position.coords.latitude;
+    userLon = position.coords.longitude;
+    userAlt = position.coords.altitude || userAlt;
+
+    updateUserLocation();
+    updateStatus(`GPS: ${userLat.toFixed(5)}, ${userLon.toFixed(5)} ±${position.coords.accuracy.toFixed(1)}m`);
+}
+
+function handleGPSError(error) {
+    let message = "GPS Error: ";
+    switch(error.code) {
+        case error.PERMISSION_DENIED:
+            message += "Permission denied";
+            break;
+        case error.POSITION_UNAVAILABLE:
+            message += "Position unavailable";
+            break;
+        case error.TIMEOUT:
+            message += "Request timeout";
+            break;
+        default:
+            message += "Unknown error";
+            break;
+    }
+    updateStatus(message, "error");
+}
+
+function updateUserLocation() {
+    if (!gpsEnabled) return;
+
+    const position = Cesium.Cartesian3.fromDegrees(userLon, userLat, 0);
+
+    if (!userLocationEntity) {
+        userLocationEntity = viewer.entities.add({
+            position: position,
+            billboard: {
+                image: 'data:image/svg+xml;base64,' + btoa(`
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+                        <circle cx="16" cy="16" r="12" fill="#2196F3" stroke="white" stroke-width="3"/>
+                        <circle cx="16" cy="16" r="4" fill="white"/>
+                    </svg>
+                `),
+                scale: 1.0,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            },
+            label: {
+                text: 'My Location',
+                font: '12pt sans-serif',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                pixelOffset: new Cesium.Cartesian2(0, -40),
+                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            }
+        });
+    } else {
+        userLocationEntity.position = position;
+    }
+}
+
+function updateGPSButton() {
+    const button = document.getElementById('gpsButton');
+    if (gpsEnabled) {
+        button.classList.add('active');
+        button.title = 'Disable GPS Tracking';
+    } else {
+        button.classList.remove('active');
+        button.title = 'Enable GPS Tracking';
+    }
+}
+
+// Enhanced AR functionality
+function toggleAR() {
+    if (arEnabled) {
+        stopAR();
+    } else {
+        startAR();
+    }
+}
+
+function startAR() {
+    if (!gpsEnabled) {
+        updateStatus("Enable GPS first for AR mode", "error");
+        return;
+    }
+
+    if (typeof DeviceOrientationEvent === 'undefined') {
+        updateStatus("Device orientation not supported", "error");
+        return;
+    }
+
+    updateStatus("Requesting device orientation permission...");
+
+    const enableAR = () => {
+        arEnabled = true;
+        orientationListenerActive = true;
+        updateARButton();
+        
+        smoothHeading = Cesium.Math.toDegrees(viewer.camera.heading);
+        smoothPitch = Cesium.Math.toDegrees(viewer.camera.pitch);
+        smoothRoll = Cesium.Math.toDegrees(viewer.camera.roll);
+        
+        viewer.scene.screenSpaceCameraController.enableRotate = false;
+        viewer.scene.screenSpaceCameraController.enableTilt = false;
+        viewer.scene.screenSpaceCameraController.enableTranslate = false;
+        viewer.scene.screenSpaceCameraController.enableZoom = true;
+        
+        window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+        
+        viewer.scene.requestRenderMode = false;
+        viewer.scene.preRender.addEventListener(updateARCamera);
+        
+        updateStatus("AR mode active! Look around to explore underground pipelines.", "success");
+    };
+
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+            .then(response => {
+                if (response === 'granted') {
+                    enableAR();
+                } else {
+                    updateStatus("Device orientation permission denied", "error");
+                }
+            })
+            .catch(error => {
+                updateStatus("Error requesting orientation permission", "error");
+            });
+    } else {
+        enableAR();
+    }
+}
+
+function stopAR() {
+    arEnabled = false;
+    orientationListenerActive = false;
+    updateARButton();
+
+    window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+
+    viewer.scene.screenSpaceCameraController.enableRotate = true;
+    viewer.scene.screenSpaceCameraController.enableTilt = true;
+    viewer.scene.screenSpaceCameraController.enableTranslate = true;
+    viewer.scene.screenSpaceCameraController.enableZoom = true;
+
+    viewer.scene.requestRenderMode = true;
+    viewer.scene.preRender.removeEventListener(updateARCamera);
+
+    updateStatus("AR mode disabled");
+}
+
+function handleDeviceOrientation(event) {
+    if (!orientationListenerActive) return;
+
+    if (event.alpha !== null) {
+        targetHeading = event.alpha + compassOffset;
+    }
+    if (event.beta !== null) {
+        targetPitch = event.beta - 90;
+    }
+    if (event.gamma !== null) {
+        targetRoll = event.gamma;
+    }
+}
+
+function updateARCamera() {
+    if (!arEnabled || !gpsEnabled) return;
+
+    const smoothingFactor = 0.1;
+    smoothHeading = lerpAngle(smoothHeading, targetHeading, smoothingFactor);
+    smoothPitch = lerp(smoothPitch, targetPitch, smoothingFactor);
+    smoothRoll = lerp(smoothRoll, targetRoll, smoothingFactor);
+
+    const cameraHeight = userAlt + 1.7;
+    const destination = Cesium.Cartesian3.fromDegrees(userLon, userLat, cameraHeight);
+
+    viewer.camera.setView({
+        destination: destination,
+        orientation: {
+            heading: Cesium.Math.toRadians(smoothHeading),
+            pitch: Cesium.Math.toRadians(smoothPitch),
+            roll: Cesium.Math.toRadians(smoothRoll)
+        }
+    });
+}
+
+function updateARButton() {
+    const button = document.getElementById('arButton');
+    if (arEnabled) {
+        button.classList.add('active');
+        button.title = 'Disable AR Mode';
+    } else {
+        button.classList.remove('active');
+        button.title = 'Enable AR Mode';
+    }
+}
+
+// Utility functions
+function lerp(start, end, factor) {
+    return start + factor * (end - start);
+}
+
+function lerpAngle(start, end, factor) {
+    const diff = Math.abs(end - start);
+    if (diff > 180) {
+        if (end > start) {
+            start += 360;
+        } else {
+            end += 360;
+        }
+    }
+    const result = lerp(start, end, factor);
+    return (result % 360 + 360) % 360;
+}
+
+// Enhanced settings functionality
+function toggleSettings() {
+    const dropdown = document.getElementById('settingsDropdown');
+    const button = document.getElementById('settingsButton');
+
+    if (dropdown.classList.contains('visible')) {
+        dropdown.classList.remove('visible');
+        button.classList.remove('active');
+    } else {
+        dropdown.classList.add('visible');
+        button.classList.add('active');
+    }
+}
+
+function updateGlobeSettings() {
+    const translucency = document.getElementById('translucencyEnabled').checked;
+    const alpha = parseFloat(document.getElementById('terrainAlpha').value);
+
+    viewer.scene.globe.translucency.enabled = translucency;
+            
+    if (translucency) {
+        viewer.scene.globe.translucency.frontFaceAlphaByDistance = new Cesium.NearFarScalar(
+            10, alpha,
+            1000, alpha * 0.8
+        );
+        viewer.scene.globe.translucency.backFaceAlphaByDistance = new Cesium.NearFarScalar(
+            10, alpha * 0.3,
+            1000, alpha * 0.1
+        );
+    }
+            
+    viewer.scene.requestRender();
+}
+
+function updatePipelineVisibility() {
+    const showPipelines = document.getElementById('showPipelines').checked;
+    pipelineEntities.forEach(entity => {
+        entity.show = showPipelines;
+    });
+    viewer.scene.requestRender();
+}
+
+function updatePipelineLabels() {
+    showPipelineLabels = document.getElementById('showPipelineLabels').checked;
+    pipelineLabels.forEach(label => {
+        label.show = showPipelineLabels;
+    });
+    viewer.scene.requestRender();
+}
+
+function updateTerrainAlpha() {
+    const alpha = parseFloat(document.getElementById('terrainAlpha').value);
+    document.getElementById('terrainAlphaValue').value = alpha.toFixed(2);
+    updateGlobeSettings();
+}
+
+function updateUndergroundDepth() {
+    const depth = parseInt(document.getElementById('undergroundDepth').value);
+    document.getElementById('undergroundDepthValue').value = depth + 'm';
+    document.getElementById('depthIndicator').textContent = depth + 'm';
+    
+    if (undergroundMode) {
+        const cameraPosition = viewer.camera.position;
+        const cartographic = Cesium.Cartographic.fromCartesian(cameraPosition);
+        const newPosition = Cesium.Cartesian3.fromDegrees(
+            Cesium.Math.toDegrees(cartographic.longitude),
+            Cesium.Math.toDegrees(cartographic.latitude),
+            -depth
+        );
+        viewer.camera.position = newPosition;
+        viewer.scene.requestRender();
+    }
+}
+
+function updatePipelineThickness() {
+    pipelineThickness = parseFloat(document.getElementById('pipelineThickness').value);
+    document.getElementById('pipelineThicknessValue').value = pipelineThickness.toFixed(1);
+    
+    // Update existing pipelines
+    pipelineEntities.forEach(entity => {
+        if (entity.polylineVolume) {
+            entity.polylineVolume.shape = createPipeShape(pipelineThickness);
+        }
+    });
+    
+    viewer.scene.requestRender();
+}
+
+function updateMaxViewDistance() {
+    maxViewDistance = parseInt(document.getElementById('maxViewDistance').value);
+    document.getElementById('maxViewDistanceValue').value = maxViewDistance + 'm';
+    
+    // Update existing pipelines
+    pipelineEntities.forEach(entity => {
+        if (entity.polylineVolume) {
+            entity.polylineVolume.distanceDisplayCondition = 
+                new Cesium.DistanceDisplayCondition(0, maxViewDistance);
+        }
+    });
+    
+    viewer.scene.requestRender();
+}
+
+function toggleUndergroundMode() {
+    undergroundMode = document.getElementById('undergroundMode').checked;
+    const indicator = document.getElementById('undergroundIndicator');
+    
+    if (undergroundMode) {
+        indicator.classList.add('visible');
+        goUnderground();
+    } else {
+        indicator.classList.remove('visible');
+        goAboveground();
+    }
+}
+
+function goUnderground() {
+    const depth = parseInt(document.getElementById('undergroundDepth').value);
+    updateStatus(`Going underground to ${depth}m depth...`);
+    
+    createSoilVisualization();
+    
+    const currentPos = viewer.camera.positionCartographic;
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+            Cesium.Math.toDegrees(currentPos.longitude),
+            Cesium.Math.toDegrees(currentPos.latitude),
+            -depth
+        ),
+        duration: 2.0,
+        complete: function() {
+            updateStatus(`Underground mode active at ${depth}m depth`, "success");
+        }
+    });
+}
+
+function goAboveground() {
+    updateStatus("Returning to surface...");
+    
+    if (soilLayer) {
+        viewer.entities.remove(soilLayer);
+        soilLayer = null;
+    }
+    
+    const currentPos = viewer.camera.positionCartographic;
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+            Cesium.Math.toDegrees(currentPos.longitude),
+            Cesium.Math.toDegrees(currentPos.latitude),
+            300
+        ),
+        duration: 2.0,
+        complete: function() {
+            updateStatus("Returned to surface");
+        }
+    });
+}
+
+function createSoilVisualization() {
+    if (soilLayer) return;
+    
+    const center = viewer.camera.positionCartographic;
+    const centerLon = Cesium.Math.toDegrees(center.longitude);
+    const centerLat = Cesium.Math.toDegrees(center.latitude);
+    
+    soilLayer = viewer.entities.add({
+        name: 'Soil Layer',
+        rectangle: {
+            coordinates: Cesium.Rectangle.fromDegrees(
+                centerLon - 0.01,
+                centerLat - 0.01,
+                centerLon + 0.01,
+                centerLat + 0.01
+            ),
+            material: new Cesium.ImageMaterialProperty({
+                image: createSoilTexture(),
+                transparent: true
+            }),
+            height: -50,
+            extrudedHeight: 0,
+            alpha: 0.7
+        }
+    });
+}
+
+function createSoilTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    
+    const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+    gradient.addColorStop(0, '#8B4513');
+    gradient.addColorStop(0.3, '#A0522D');
+    gradient.addColorStop(0.6, '#654321');
+    gradient.addColorStop(1, '#4A4A4A');
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 256, 256);
+    
+    for (let i = 0; i < 500; i++) {
+        ctx.fillStyle = `rgba(${Math.random() * 50 + 100}, ${Math.random() * 30 + 70}, ${Math.random() * 20 + 40}, 0.3)`;
+        ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+    }
+    
+    return canvas.toDataURL();
+}
+
+// Enhanced UI functionality
+function toggleUIVisibility() {
+    uiVisible = !uiVisible;
+    const button = document.getElementById('eyeButton');
+    const eyeIcon = document.getElementById('eyeIcon');
+    const eyeOffIcon = document.getElementById('eyeOffIcon');
+    
+    // Elements to hide/show (excluding the eye button itself)
+    const elementsToToggle = [
+        document.getElementById('controlPanel'),
+        document.getElementById('statusDisplay'),
+        document.getElementById('zoomControls'),
+        document.getElementById('streetViewControls'),
+        document.getElementById('pipelineInfo'),
+        document.getElementById('undergroundIndicator'),
+        document.querySelector('.cesium-viewer-baseLayerPickerContainer')
+    ];
+    
+    elementsToToggle.forEach(element => {
+        if (element) {
+            element.style.display = uiVisible ? '' : 'none';
+        }
+    });
+    
+    // Update eye button appearance
+    if (uiVisible) {
+        button.classList.remove('hidden-mode');
+        eyeIcon.style.display = 'block';
+        eyeOffIcon.style.display = 'none';
+        button.title = 'Hide UI';
+    } else {
+        button.classList.add('hidden-mode');
+        eyeIcon.style.display = 'none';
+        eyeOffIcon.style.display = 'block';
+        button.title = 'Show UI';
+    }
+}
+
+function zoomCamera(factor) {
+    const camera = viewer.camera;
+    const cartographic = viewer.camera.positionCartographic;
+    const height = cartographic.height;
+    
+    let newHeight = height * factor;
+    const minHeight = 0.1;
+    const maxHeight = 50000000;
+    
+    newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+    
+    const longitude = Cesium.Math.toDegrees(cartographic.longitude);
+    const latitude = Cesium.Math.toDegrees(cartographic.latitude);
+    
+    camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, newHeight),
+        orientation: {
+            heading: camera.heading,
+            pitch: camera.pitch,
+            roll: camera.roll
+        },
+        duration: 0.3
+    });
+}
+
+// Pipeline information
+function showPipelineInfo(entity) {
+    const info = document.getElementById('pipelineInfo');
+    const props = entity.properties;
+    
+    document.getElementById('pipelineName').textContent = entity.name || 'Unknown Pipeline';
+    document.getElementById('pipelineType').textContent = props.type || 'Unknown';
+    document.getElementById('pipelineDepth').textContent = props.depth || 'Unknown';
+    document.getElementById('pipelineMaterial').textContent = props.material || 'Unknown';
+    document.getElementById('pipelineDiameter').textContent = props.diameter || 'Unknown';
+    
+    info.classList.add('visible');
+    
+    setTimeout(() => {
+        if (info.classList.contains('visible')) {
+            hidePipelineInfo();
+        }
+    }, 10000);
+}
+
+function hidePipelineInfo() {
+    document.getElementById('pipelineInfo').classList.remove('visible');
+}
+
+// Status management
+function updateStatus(message, type = '') {
+    const statusEl = document.getElementById('statusDisplay');
+    statusEl.textContent = message;
+    statusEl.className = '';
+    
+    if (type) {
+        statusEl.classList.add(type);
+    }
+    
+    console.log(message);
+    
+    if (type !== 'error') {
+        setTimeout(() => {
+            if (statusEl.textContent === message) {
+                statusEl.textContent = '';
+            }
+        }, 5000);
+    }
+}
+
+// Initialize when page loads
+window.addEventListener('load', function() {
+    initializeApp();
+});
+
+// Handle page visibility for performance
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        viewer.scene.requestRenderMode = true;
+    } else {
+        if (arEnabled) {
+            viewer.scene.requestRenderMode = false;
+        }
+        viewer.scene.requestRender();
+    }
+});
+</script>
+</body>
+</html>
