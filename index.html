@@ -687,7 +687,7 @@
         }
 
         function createSinglePipeline(positions, config) {
-            // Create a tube-like pipeline
+            // Create a tube-like pipeline – keep it visible at all zoom levels
             const pipelineEntity = viewer.entities.add({
                 name: config.type,
                 polylineVolume: {
@@ -698,7 +698,8 @@
                     outlineColor: config.color.brighten(0.2, new Cesium.Color()),
                     cornerType: Cesium.CornerType.ROUNDED,
                     extrudedHeight: 0,
-                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 50000)
+                    // Ensure the pipeline never disappears due to depth testing or distance conditions
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
                 },
                 // Store pipeline metadata
                 properties: {
@@ -1273,30 +1274,42 @@
             const button = document.getElementById('eyeButton');
             const eyeIcon = document.getElementById('eyeIcon');
             const eyeOffIcon = document.getElementById('eyeOffIcon');
-            
-            const elementsToHide = [
-                document.getElementById('controlPanel'),
+
+            // Elements outside the main control panel that we want to toggle
+            const auxiliaryElements = [
                 document.getElementById('statusDisplay'),
                 document.getElementById('zoomControls'),
                 document.getElementById('pipelineInfo')
             ];
-            
-            elementsToHide.forEach(element => {
-                if (element && element.id !== 'eyeButton') {
-                    element.style.display = uiVisible ? 'block' : 'none';
-                }
+
+            // Toggle visibility of the auxiliary elements
+            auxiliaryElements.forEach(el => {
+                if (!el) return;
+                el.style.display = uiVisible ? 'block' : 'none';
             });
-            
+
+            // Toggle visibility of every child inside the control panel EXCEPT the eye button itself.
+            const controlPanel = document.getElementById('controlPanel');
+            Array.from(controlPanel.children).forEach(child => {
+                if (child.id === 'eyeButton') return; // keep eye button visible at all times
+                child.style.display = uiVisible ? 'flex' : 'none';
+            });
+
+            // Handle eye-icon graphics swap
             if (uiVisible) {
-                button.classList.remove('hidden');
                 eyeIcon.style.display = 'block';
                 eyeOffIcon.style.display = 'none';
                 button.title = 'Hide UI';
             } else {
-                button.classList.add('hidden');
                 eyeIcon.style.display = 'none';
                 eyeOffIcon.style.display = 'block';
                 button.title = 'Show UI';
+            }
+
+            // Also show/hide the base-layer picker provided by Cesium
+            const baseLayerPicker = document.querySelector('.cesium-viewer-baseLayerPickerContainer');
+            if (baseLayerPicker) {
+                baseLayerPicker.style.display = uiVisible ? 'block' : 'none';
             }
         }
 
