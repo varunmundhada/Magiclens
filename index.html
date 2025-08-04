@@ -372,17 +372,22 @@
             }
         }
 
-        /* Hide default Cesium UI elements */
+        /* Hide default Cesium UI elements except base layer picker */
         .cesium-viewer-toolbar,
         .cesium-viewer-geocoderContainer,
         .cesium-viewer-homeButtonContainer,
         .cesium-viewer-sceneModePicker,
         .cesium-viewer-projectionPickerContainer,
-        .cesium-viewer-baseLayerPickerContainer,
         .cesium-viewer-navigationHelpButtonContainer,
         .cesium-viewer-fullscreenButtonContainer,
         .cesium-viewer-vrButtonContainer {
             display: none !important;
+        }
+        
+        /* Keep base layer picker visible */
+        .cesium-viewer-baseLayerPickerContainer {
+            display: block !important;
+            z-index: 150 !important;
         }
 
         .cesium-widget-credits {
@@ -528,8 +533,8 @@
             
             // Create Cesium viewer with optimized settings
             viewer = new Cesium.Viewer('cesiumContainer', {
-                // Use Bing Maps as requested
-                baseLayerPicker: false,
+                // Enable base layer picker as requested
+                baseLayerPicker: true,
                 geocoder: false,
                 homeButton: false,
                 sceneModePicker: false,
@@ -546,15 +551,8 @@
                 maximumRenderTimeChange: Infinity
             });
 
-            // Set up Bing Maps imagery provider as requested
-            viewer.imageryLayers.removeAll();
-            viewer.imageryLayers.add(new Cesium.ImageryLayer(
-                new Cesium.BingMapsImageryProvider({
-                    url: 'https://dev.virtualearth.net',
-                    key: 'AkPdmMLGXzJ6Nzh6Zj8V8CHZ4QgQQo1M1UyN8FdKq4A1TXXD9VvP0DdGsqAj8zU0',
-                    mapStyle: Cesium.BingMapsStyle.AERIAL_WITH_LABELS_ON_DEMAND
-                })
-            ));
+            // Keep default imagery layers since base layer picker is enabled
+            // User can now choose from available map options including Bing, OpenStreetMap, etc.
 
             // Configure globe for underground viewing
             const globe = viewer.scene.globe;
@@ -747,9 +745,9 @@
             document.getElementById('settingsButton').onclick = toggleSettings;
             document.getElementById('eyeButton').onclick = toggleUIVisibility;
             
-            // Zoom control handlers
-            document.getElementById('zoomInBtn').onclick = () => zoomCamera(0.5);
-            document.getElementById('zoomOutBtn').onclick = () => zoomCamera(2.0);
+            // Zoom control handlers with proper factor values
+            document.getElementById('zoomInBtn').onclick = () => zoomCamera(0.8); // Zoom in (smaller factor)
+            document.getElementById('zoomOutBtn').onclick = () => zoomCamera(1.2); // Zoom out (larger factor)
             
             // Settings handlers
             document.getElementById('translucencyEnabled').onchange = updateGlobeSettings;
@@ -1287,13 +1285,19 @@
                 }
             });
             
+            // Hide/show the base layer picker too
+            const baseLayerPicker = document.querySelector('.cesium-viewer-baseLayerPickerContainer');
+            if (baseLayerPicker) {
+                baseLayerPicker.style.display = uiVisible ? 'block' : 'none';
+            }
+            
             if (uiVisible) {
                 button.classList.remove('hidden');
                 eyeIcon.style.display = 'block';
                 eyeOffIcon.style.display = 'none';
                 button.title = 'Hide UI';
             } else {
-                button.classList.add('hidden');
+                // Keep the button visible but change its appearance
                 eyeIcon.style.display = 'none';
                 eyeOffIcon.style.display = 'block';
                 button.title = 'Show UI';
@@ -1302,17 +1306,40 @@
 
         function zoomCamera(factor) {
             const camera = viewer.camera;
-            const position = camera.position;
-            const direction = camera.direction;
             
-            const distance = Cesium.Cartesian3.magnitude(position);
-            const moveDistance = distance * (1 - factor);
+            // Use a more sensitive zoom approach
+            const zoomAmount = factor > 1 ? 1.2 : 0.8; // Less sensitive zoom steps
             
-            const moveVector = Cesium.Cartesian3.multiplyByScalar(direction, moveDistance, new Cesium.Cartesian3());
-            const newPosition = Cesium.Cartesian3.add(position, moveVector, new Cesium.Cartesian3());
+            // Get current camera height above terrain
+            const cartographic = viewer.camera.positionCartographic;
+            const height = cartographic.height;
             
-            camera.position = newPosition;
-            viewer.scene.requestRender();
+            // Calculate new height with minimum and maximum limits
+            let newHeight = height * zoomAmount;
+            
+            // Set reasonable zoom limits
+            const minHeight = 1; // 1 meter minimum
+            const maxHeight = 50000000; // 50,000 km maximum
+            
+            newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+            
+            // Calculate the new position
+            const longitude = Cesium.Math.toDegrees(cartographic.longitude);
+            const latitude = Cesium.Math.toDegrees(cartographic.latitude);
+            
+            // Smoothly move to new position
+            camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, newHeight),
+                orientation: {
+                    heading: camera.heading,
+                    pitch: camera.pitch,
+                    roll: camera.roll
+                },
+                duration: 0.3, // Quick smooth animation
+                complete: function() {
+                    viewer.scene.requestRender();
+                }
+            });
         }
 
         // Pipeline information
