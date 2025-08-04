@@ -28,7 +28,19 @@
             cursor: pointer;
             box-sizing: border-box;
             margin-bottom: 5px;
+            display: flex; align-items: center; justify-content: center; gap: 6px; /* NEW: flex for icon+text */
         }
+        .control-btn .icon { font-size: 1.2em; }
+        .hidden { display: none !important; }
+        .ui-hidden { display: none !important; }
+        #toggleUiBtn {
+            position: absolute; bottom: 45px; right: 15px; z-index: 21;
+            width: 48px; height: 48px; background: rgba(0,0,0,0.6);
+            border: 2px solid #fff; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #toggleUiBtn:hover { background: rgba(0,0,0,0.8); }
+        #toggleUiBtn svg { width: 28px; height: 28px; fill: #fff; }
         .control-btn:hover { background: rgba(230, 230, 230, 0.95); }
         .control-btn:active { background: rgba(200, 200, 200, 0.95); }
         .control-btn:disabled { background: #ccc; color: #666; cursor: not-allowed; border-color: #999; }
@@ -86,13 +98,14 @@
 </head>
 <body>
     <div id="cesiumContainer"></div>
-    <div id="btnContainer">
-        <button id="gpsBtn" class="control-btn">Enable GPS Tracking</button>
-        <button id="orientationBtn" class="control-btn">Enable AR Mode</button>
-        <button id="calibrateBtn" class="control-btn" style="display:none;">Calibrate</button>
-        <button id="disableTrackingBtn" class="control-btn" style="display:none;">Disable Tracking</button>
+    <div id="btnContainer" class="hidable-ui">
+        <button id="gpsBtn" class="control-btn"><span class="icon">🛰️</span>GPS</button>
+        <button id="orientationBtn" class="control-btn"><span class="icon">📱</span>AR</button>
+        <button id="calibrateBtn" class="control-btn hidden"><span class="icon">🧭</span>Calib</button>
+        <button id="disableTrackingBtn" class="control-btn hidden"><span class="icon">🚫</span>Stop</button>
+        <button id="settingsBtn" class="control-btn"><span class="icon">⚙️</span>Settings</button>
     </div>
-    <div id="toolbar">
+    <div id="toolbar" class="hidable-ui hidden">
         <table>
             <tbody>
             <tr>
@@ -118,6 +131,7 @@
         </table>
     </div>
     <div id="status">Initializing... Please ensure HTTPS.</div>
+    <button id="toggleUiBtn" title="Toggle UI Visibility"></button>
     <script>
         Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5Y2ZiMzU0Mi00NjkyLTQxZjctOGNjZC02YjgyYzliOTEwNGYiLCJpZCI6Mjk2ODk1LCJpYXQiOjE3NDc2NTc5MzZ9.Mb95-v_3Pm4NQQohnck02L-zmHD4SWj5vv57m0fP4ig'; // Or 'YOUR_CESIUM_ION_ACCESS_TOKEN'
 
@@ -207,30 +221,35 @@
         const pipelineEntities = [];
         function drawPipeline(coordinates, color, depth) {
             if (!coordinates || coordinates.length < 2) { return; }
+            const labelText = `Pipeline (${Math.abs(depth)}m)`;
             const pipelineEntity = viewer.entities.add({
                 polylineVolume: {
                     positions: coordinates.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, depth)),
                     shape: circleShape,
                     material: color.withAlpha(0.9),
-                    outline: false,
+                    depthFailMaterial: color.withAlpha(0.9), /* NEW ensure visible when occluded */
+                    outline: false
+                },
+                label: {
+                    text: labelText,
+                    font: 'bold 12px sans-serif',
+                    fillColor: color.withAlpha(0.9),
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -10),
+                    show: false,
+                    disableDepthTestDistance: Infinity
                 }
             });
             pipelineEntities.push(pipelineEntity);
         }
 
-        // --- Pipeline Visibility by Zoom Level ---
-        const PIPELINE_VISIBILITY_HEIGHT_THRESHOLD = 500; // meters above ellipsoid; adjust as needed
+        // REMOVE ZOOM THRESHOLD LOGIC & SIMPLIFY VISIBILITY
         let lastPipelineVisibilityState = null;
-
         function updatePipelineVisibilityBasedOnZoom() {
-            if (!viewer.camera.positionCartographic) return;
-            const cameraHeight = viewer.camera.positionCartographic.height;
-            // Only show pipelines if zoomed in enough AND user wants them
-            let shouldPipelinesBeVisible = cameraHeight < PIPELINE_VISIBILITY_HEIGHT_THRESHOLD;
-            shouldPipelinesBeVisible = shouldPipelinesBeVisible && viewModel.showVectorData;
-            if (shouldPipelinesBeVisible !== lastPipelineVisibilityState) {
-                pipelineEntities.forEach(entity => { entity.show = shouldPipelinesBeVisible; });
-                lastPipelineVisibilityState = shouldPipelinesBeVisible;
+            const shouldShow = viewModel.showVectorData;
+            if (shouldShow !== lastPipelineVisibilityState) {
+                pipelineEntities.forEach(e => { e.show = shouldShow; });
+                lastPipelineVisibilityState = shouldShow;
                 if (viewer.scene.requestRenderMode) viewer.scene.requestRender();
             }
         }
@@ -297,6 +316,9 @@
         viewer.screenSpaceEventHandler.setInputAction((movement) => {
             const pickedObject = viewer.scene.pick(movement.position);
             if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.polylineVolume) {
+                // Hide previous labels & show current
+                pipelineEntities.forEach(en => { if (en.label) en.label.show = false; });
+                pickedObject.id.label && (pickedObject.id.label.show = true);
                 updateStatus("Flying to selected pipeline segment...");
                 const entity = pickedObject.id;
                 const pvol = entity.polylineVolume;
@@ -339,6 +361,24 @@
         const orientationBtn = document.getElementById('orientationBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const disableTrackingBtn = document.getElementById('disableTrackingBtn');
+        const settingsBtn = document.getElementById('settingsBtn'); /* NEW */
+        const toggleUiBtn = document.getElementById('toggleUiBtn'); /* NEW */
+        const hidableUiElements = document.querySelectorAll('.hidable-ui'); /* NEW */
+        const eyeIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M288 80c-65.2 0-118.8 29.6-159.9 67.7C89.6 183.5 63 226 49.4 256c13.6 30 40.2 72.5 78.6 108.3C169.2 402.4 222.8 432 288 432s118.8-29.6 159.9-67.7C487.8 328.5 514.4 286 527 256c-13.6-30-40.2-72.5-78.6-108.3C406.8 109.6 353.2 80 288 80zM288 368c-59.4 0-107.6-48.2-107.6-107.6S228.6 152.8 288 152.8s107.6 48.2 107.6 107.6S347.4 368 288 368zm0-160c-28.7 0-51.6 23-51.6 51.6s23 51.6 51.6 51.6 51.6-23 51.6-51.6-22.9-51.6-51.6-51.6z"/></svg>`;
+        const eyeSlashIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7C556.1 346.1 576 299.6 576 256c0-10.8-1-21.4-3-31.8l-7.7-27.1-22.3-78.8-22.1-78.3c-3.3-11.8-14.7-20-27.4-20H304.7l-44.1-34.6L38.8 5.1zM288 128c38.3 0 71.9 17.7 95.5 45.4l-52.6 41.3c-6.8-2-14-3.1-21.4-3.1-44.2 0-80 35.8-80 80 0 7.5 1 14.8 3.1 21.7l-41.3 52.6C145.7 322.1 128 290.3 128 256c0-43.2 17.1-82.9 45.4-112.5C201.1 130.1 242.3 128 288 128zM64 256c0 44.2 35.8 80 80 80 12.3 0 24-2.8 34.9-7.7l-44.5-35c-15.6-12.2-22.9-32.9-18.1-51.9l-22.3-17.5c-18.4 20.3-30.7 45.4-30.7 73.6z"/></svg>`;
+        let isUiVisible = true;
+        function toggleUiVisibility() {
+            isUiVisible = !isUiVisible;
+            hidableUiElements.forEach(el => el.classList.toggle('ui-hidden', !isUiVisible));
+            toggleUiBtn.innerHTML = isUiVisible ? eyeIcon : eyeSlashIcon;
+            viewer.scene.requestRender();
+        }
+        toggleUiBtn.addEventListener('click', toggleUiVisibility);
+        window.addEventListener('load', () => { toggleUiBtn.innerHTML = eyeIcon; });
+        settingsBtn.addEventListener('click', () => {
+            toolbarElement.classList.toggle('hidden');
+            viewer.scene.requestRender();
+        });
 
         function updateButtonsState() {
             gpsBtn.style.display = gpsEnabled ? "none" : "block";
